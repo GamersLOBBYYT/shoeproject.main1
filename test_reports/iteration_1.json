@@ -1,0 +1,54 @@
+{
+  "summary": "Comprehensive backend + frontend integration testing for SOLE Premium Footwear MVP. Backend: 18/19 pytest cases passed; full auth (JWT cookie + Bearer + Google session-token), products (6 with 5 colorways each), demo order (paid + free-shipping >=$100), live tracking, and Stripe checkout session/status all work. Frontend: end-to-end flow verified — hero color recolor, product grid + category filter, cart, logged-out checkout->/auth redirect, login, demo order placement, /order-success page, /track/{id} with timeline + Leaflet map, /orders page, and Stripe redirect to checkout.stripe.com all confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Brute-force lockout uses request.client.host as part of the identifier (`{ip}:{email}`), but in the Kubernetes ingress environment request.client.host is the proxy IP and rotates between multiple ingress pods (observed two distinct IPs: 10.79.138.194 and 10.79.128.133). Result: a real attacker hitting from one client IP would get attempts split across rows, so the 5-strike lockout (LOCKOUT_ATTEMPTS=5) does NOT trigger reliably. Fix: read X-Forwarded-For (first IP) when present, or key only by email. Test test_lockout_after_5_failures consistently sees a 401 instead of the expected 429 after 6 wrong attempts."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "CartDrawer",
+        "issue": "react-hot-toast toast notification ('<Product> added to bag') is rendered with a higher stacking context than the cart drawer footer and overlaps the [data-testid=cart-checkout-btn] for ~4s. Real users tapping checkout immediately after add-to-cart will hit the toast instead. Even Playwright `force=True` clicks are intercepted; only a JS-level .click() succeeded. Consider lowering toast z-index, moving toaster to top, or shortening duration.",
+        "selector": "[data-testid='cart-checkout-btn']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Hero",
+        "issues": ["Hero shoe color recolor uses CSS hue-rotate which makes the recolored shoe NOT match the dot's exact hex (by design per main agent, but the Frost/white dot using grayscale+brightness produces a washed-out tint that's not visibly white)."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix brute-force lockout: use X-Forwarded-For (or just email) as the rate-limit key so the 5-strike 429 lockout actually triggers behind the ingress proxy. Currently broken in production-like environments.",
+    "Lower z-index of toast container or render toaster above the drawer, so the cart-checkout-btn isn't covered by the 'added to bag' toast for ~4 seconds after add-to-cart."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 642 lines — close to the 700-line limit; consider splitting auth, orders, tracking, and stripe routes into separate modules.",
+    "make_stripe() uses request.base_url for the webhook URL. Behind an ingress with internal-vs-external host mismatch, the Stripe webhook callback URL may point to a non-public host. Consider deriving from REACT_APP_BACKEND_URL env or a dedicated PUBLIC_BASE_URL env.",
+    "Login lockout key uses raw `request.client.host` (proxy IP) which is unsafe behind reverse proxy: it both fails to lock real attackers AND can lock unrelated users sharing the same proxy IP. Use X-Forwarded-For (first hop) and consider keying by email only.",
+    "get_current_user accepts a Bearer token that is BOTH a JWT and a session_token (tried in sequence). This is fine but means a leaked refresh_token cookie could potentially be mistaken for an access token (guarded by `type` check — OK)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new file, 19 tests)",
+    "/app/backend/tests/__init__.py (empty marker)"
+  ],
+  "success_rate": {"backend": "95% (18/19)", "frontend": "100% of critical flows"},
+  "test_credentials": "admin@sole.com / Admin@123, john@sole.com / Password123 (from /app/memory/test_credentials.md, verified seeded on startup)",
+  "seed_data_creation": "Tests create + cleanup throwaway users (TEST_/test_user_/lockout_ prefixes) and Google OAuth session via direct mongo write per /app/auth_testing.md. Cleanup runs inside each test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite is at /app/backend/tests/backend_test.py — run with `pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml`. After the lockout fix lands, re-run test_lockout_after_5_failures to confirm 429 is returned. Stripe checkout was verified end-to-end up to redirect; do NOT complete a real Stripe payment. Cart-checkout toast overlap can be reproduced by clicking add-to-cart then immediately opening the drawer and clicking checkout within 4s.",
+  "rca of the issue": "Lockout bug RCA: In server.py:260, `ip = request.client.host if request.client else 'unknown'` resolves to the in-cluster ingress pod IP, which round-robins across multiple replicas. The composite identifier `{ip}:{email}` therefore creates separate counters per proxy hop, splitting attempts. Reproduction: POST /api/auth/login 6 times with wrong password and inspect `db.login_attempts` — multiple rows with the same email but different IPs and counts < LOCKOUT_ATTEMPTS. Mitigation: extract real client IP from `request.headers.get('x-forwarded-for', '').split(',')[0].strip()` with fallback to request.client.host."
+}
