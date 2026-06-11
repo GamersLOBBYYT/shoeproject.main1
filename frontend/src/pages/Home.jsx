@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
+import { ProductCard } from "@/components/ProductCard";
 import {
   Ticker,
   BannerSection,
@@ -15,85 +16,6 @@ import {
 const FILTERS = ["all", "running", "casual", "training"];
 
 const scrollToSection = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
-
-/* ----------------------------- Product Card ----------------------------- */
-const ProductCard = ({ product }) => {
-  const { addItem } = useCart();
-  const [color, setColor] = useState(product.colors[0]);
-  const [wishlisted, setWishlisted] = useState(false);
-
-  const cycleColor = () => {
-    const idx = product.colors.findIndex((c) => c.name === color.name);
-    setColor(product.colors[(idx + 1) % product.colors.length]);
-  };
-
-  return (
-    <article
-      className={`product-card ${product.featured ? "product-card--featured" : ""}`}
-      data-testid={`product-card-${product.id}`}
-    >
-      <div className="product-card__visual">
-        <div className="product-card__bg" style={{ "--card-color": color.hex === "#ffffff" ? product.card_color : color.hex }} />
-        <img
-          src={product.image}
-          alt={product.name}
-          className="product-card__img"
-          style={{ filter: color.filter === "none" ? undefined : color.filter }}
-          onClick={cycleColor}
-          data-testid={`product-img-${product.id}`}
-        />
-        <div className="product-card__actions">
-          <button
-            className={`card-action ${wishlisted ? "card-action--active" : ""}`}
-            aria-label="Wishlist"
-            onClick={() => setWishlisted(!wishlisted)}
-            data-testid={`wishlist-btn-${product.id}`}
-          >
-            <i className={`${wishlisted ? "fa-solid" : "fa-regular"} fa-heart`}></i>
-          </button>
-        </div>
-        {product.badge && (
-          <span className={`product-card__badge ${product.badge === "Hot" ? "product-card__badge--hot" : ""}`}>
-            {product.badge}
-          </span>
-        )}
-      </div>
-      <div className="product-card__info">
-        <div className="product-card__meta">
-          <span className="product-card__brand">{product.brand}</span>
-          <div className="product-card__stars">{"★".repeat(product.rating)}{"☆".repeat(5 - product.rating)}</div>
-        </div>
-        <h3 className="product-card__name">{product.name}</h3>
-        <div className="product-card__colors">
-          {product.colors.map((c) => (
-            <button
-              key={c.name}
-              className={`color-dot color-dot--small ${c.name === color.name ? "color-dot--active" : ""}`}
-              style={{ "--c": c.hex }}
-              onClick={() => setColor(c)}
-              aria-label={c.name}
-              data-testid={`color-dot-${product.id}-${c.name.toLowerCase()}`}
-            />
-          ))}
-        </div>
-        <div className="product-card__footer">
-          <span className="product-card__price">${product.price.toFixed(2)}</span>
-          <button
-            className="btn-add"
-            onClick={() => {
-              addItem(product, color);
-              toast.success(`${product.name} (${color.name}) added to bag`);
-            }}
-            data-testid={`add-to-cart-${product.id}`}
-            aria-label="Add to cart"
-          >
-            <i className="fa-solid fa-plus"></i>
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-};
 
 /* --------------------------------- Hero --------------------------------- */
 const Hero = ({ featured }) => {

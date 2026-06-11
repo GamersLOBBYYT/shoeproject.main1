@@ -6,10 +6,12 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import uuid
+import asyncio
 import logging
 import bcrypt
 import jwt
 import httpx
+import resend
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 
@@ -219,12 +221,21 @@ class OrderCreateIn(BaseModel):
     items: List[OrderItemIn]
     shipping: ShippingIn
     card_last4: Optional[str] = None
+    origin_url: Optional[str] = None
 
 
 class CheckoutCreateIn(BaseModel):
     items: List[OrderItemIn]
     shipping: ShippingIn
     origin_url: str
+
+
+class WishlistToggleIn(BaseModel):
+    product_id: str
+
+
+class WishlistMergeIn(BaseModel):
+    product_ids: List[str] = []
 
 
 # ---------------------------------------------------------------- Auth routes
@@ -374,7 +385,7 @@ SHIPPING_FEE = 8.0
 
 
 async def build_order(user: dict, items: List[OrderItemIn], shipping: ShippingIn,
-                      payment_method: str, status: str) -> dict:
+                      payment_method: str, status: str, origin: Optional[str] = None) -> dict:
     if not items:
         raise HTTPException(status_code=400, detail="Cart is empty")
     order_items = []
@@ -411,6 +422,8 @@ async def build_order(user: dict, items: List[OrderItemIn], shipping: ShippingIn
         "created_at": datetime.now(timezone.utc).isoformat(),
         "paid_at": None,
         "stripe_session_id": None,
+        "origin": origin.rstrip("/") if origin else None,
+        "confirmation_email_sent": False,
     }
     await db.orders.insert_one(dict(order))
     return order
@@ -419,7 +432,7 @@ async def build_order(user: dict, items: List[OrderItemIn], shipping: ShippingIn
 @api_router.post("/orders")
 async def create_mock_order(body: OrderCreateIn, user: dict = Depends(get_current_user)):
     """Demo payment: order is created and instantly marked paid."""
-    order = await build_order(user, body.items, body.shipping, "demo_card", "paid")
+    order = await build_order(user, body.items, body.shipping, "demo_card", "paid", origin=body.origin_url)
     paid_at = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one({"order_id": order["order_id"]}, {"$set": {"paid_at": paid_at}})
     order["paid_at"] = paid_at
@@ -436,6 +449,7 @@ async def create_mock_order(body: OrderCreateIn, user: dict = Depends(get_curren
         "metadata": {"card_last4": body.card_last4 or "4242"},
         "created_at": paid_at,
     })
+    await trigger_order_confirmation(order["order_id"])
     return order
 
 
@@ -504,6 +518,162 @@ async def track_order(order_id: str, user: dict = Depends(get_current_user)):
     }
 
 
+# ---------------------------------------------------------------- Order confirmation emails
+def build_order_email_html(order: dict) -> str:
+    rows = "".join(
+        f"<tr>"
+        f"<td style='padding:12px 0;border-bottom:1px solid #eeeeee;font-family:Arial,sans-serif;font-size:14px;color:#222222;'>"
+        f"{item['name']} <span style='color:#888888;'>({item['color'].get('name', '')}) × {item['quantity']}</span></td>"
+        f"<td align='right' style='padding:12px 0;border-bottom:1px solid #eeeeee;font-family:Arial,sans-serif;font-size:14px;color:#222222;font-weight:bold;'>"
+        f"${item['line_total']:.2f}</td></tr>"
+        for item in order["items"]
+    )
+    shipping_line = "Free" if order["shipping_fee"] == 0 else f"${order['shipping_fee']:.2f}"
+    ship = order["shipping"]
+    track_btn = ""
+    if order.get("origin"):
+        track_btn = (
+            f"<tr><td colspan='2' align='center' style='padding:28px 0 8px;'>"
+            f"<a href='{order['origin']}/track/{order['order_id']}' "
+            f"style='background:#ff4757;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:50px;"
+            f"font-family:Arial,sans-serif;font-size:14px;font-weight:bold;display:inline-block;'>Track Your Order</a>"
+            f"</td></tr>"
+        )
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#f4f4f6;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f6;padding:32px 0;">
+<tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:14px;overflow:hidden;">
+<tr><td style="background:#0c0c14;padding:28px 36px;">
+<span style="font-family:Arial,sans-serif;font-size:30px;font-weight:bold;letter-spacing:4px;color:#ffffff;">SOLE</span>
+<span style="font-family:Arial,sans-serif;font-size:12px;color:#ff4757;letter-spacing:2px;float:right;padding-top:12px;">ORDER CONFIRMED</span>
+</td></tr>
+<tr><td style="padding:32px 36px;">
+<p style="font-family:Arial,sans-serif;font-size:18px;color:#111111;margin:0 0 6px;font-weight:bold;">Thanks for your order, {ship['name']}!</p>
+<p style="font-family:Arial,sans-serif;font-size:13px;color:#777777;margin:0 0 24px;">Order <strong style="color:#ff4757;">#{order['order_id']}</strong> is confirmed and being prepped at our fulfillment center.</p>
+<table width="100%" cellpadding="0" cellspacing="0">
+{rows}
+<tr><td style="padding:14px 0 4px;font-family:Arial,sans-serif;font-size:13px;color:#777777;">Subtotal</td>
+<td align="right" style="padding:14px 0 4px;font-family:Arial,sans-serif;font-size:13px;color:#222222;">${order['subtotal']:.2f}</td></tr>
+<tr><td style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;color:#777777;">Shipping</td>
+<td align="right" style="padding:4px 0;font-family:Arial,sans-serif;font-size:13px;color:#222222;">{shipping_line}</td></tr>
+<tr><td style="padding:10px 0;font-family:Arial,sans-serif;font-size:16px;color:#111111;font-weight:bold;border-top:2px solid #111111;">Total</td>
+<td align="right" style="padding:10px 0;font-family:Arial,sans-serif;font-size:16px;color:#111111;font-weight:bold;border-top:2px solid #111111;">${order['total']:.2f}</td></tr>
+{track_btn}
+</table>
+<p style="font-family:Arial,sans-serif;font-size:12px;color:#999999;margin:28px 0 0;line-height:1.7;">
+<strong style="color:#555555;">Shipping to:</strong><br/>{ship['name']} · {ship['phone']}<br/>{ship['address']}, {ship['city']} {ship.get('zip_code') or ''}</p>
+</td></tr>
+<tr><td style="background:#f9f9fb;padding:18px 36px;font-family:Arial,sans-serif;font-size:11px;color:#aaaaaa;" align="center">
+© 2026 SOLE. Premium footwear, delivered with precision.</td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
+async def send_order_confirmation(order: dict):
+    """Sends via Resend when RESEND_API_KEY is configured; otherwise stores a mock email record."""
+    subject = f"Your SOLE order #{order['order_id']} is confirmed"
+    record = {
+        "email_id": str(uuid.uuid4()),
+        "order_id": order["order_id"],
+        "user_id": order["user_id"],
+        "to": order["email"],
+        "subject": subject,
+        "html": build_order_email_html(order),
+        "provider": "mock",
+        "status": "mocked",
+        "error": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    if api_key:
+        try:
+            resend.api_key = api_key
+            params = {
+                "from": os.environ.get("SENDER_EMAIL", "onboarding@resend.dev"),
+                "to": [order["email"]],
+                "subject": subject,
+                "html": record["html"],
+            }
+            result = await asyncio.to_thread(resend.Emails.send, params)
+            record["provider"] = "resend"
+            record["status"] = "sent"
+            record["provider_id"] = result.get("id")
+        except Exception as e:
+            logger.error(f"Resend send failed for order {order['order_id']}: {e}")
+            record["provider"] = "resend"
+            record["status"] = "failed"
+            record["error"] = str(e)
+    await db.emails.insert_one(record)
+
+
+async def trigger_order_confirmation(order_id: str):
+    """Idempotent: generates/sends the confirmation email exactly once per order."""
+    result = await db.orders.update_one(
+        {"order_id": order_id, "confirmation_email_sent": {"$ne": True}},
+        {"$set": {"confirmation_email_sent": True}},
+    )
+    if result.modified_count > 0:
+        order = await db.orders.find_one({"order_id": order_id}, {"_id": 0})
+        if order:
+            await send_order_confirmation(order)
+
+
+@api_router.get("/orders/{order_id}/email")
+async def get_order_email(order_id: str, user: dict = Depends(get_current_user)):
+    order = await db.orders.find_one({"order_id": order_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    email = await db.emails.find_one({"order_id": order_id}, {"_id": 0}, sort=[("created_at", -1)])
+    if not email:
+        raise HTTPException(status_code=404, detail="No confirmation email for this order yet")
+    return email
+
+
+# ---------------------------------------------------------------- Wishlist
+@api_router.get("/wishlist")
+async def get_wishlist(user: dict = Depends(get_current_user)):
+    doc = await db.wishlists.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {"product_ids": doc["product_ids"] if doc else []}
+
+
+@api_router.post("/wishlist/toggle")
+async def toggle_wishlist(body: WishlistToggleIn, user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": body.product_id}, {"_id": 0})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    doc = await db.wishlists.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    ids = doc["product_ids"] if doc else []
+    if body.product_id in ids:
+        ids = [i for i in ids if i != body.product_id]
+        wishlisted = False
+    else:
+        ids = ids + [body.product_id]
+        wishlisted = True
+    await db.wishlists.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"product_ids": ids, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"product_ids": ids, "wishlisted": wishlisted}
+
+
+@api_router.post("/wishlist/merge")
+async def merge_wishlist(body: WishlistMergeIn, user: dict = Depends(get_current_user)):
+    valid = await db.products.find({"id": {"$in": body.product_ids}}, {"_id": 0, "id": 1}).to_list(100)
+    valid_ids = [p["id"] for p in valid]
+    doc = await db.wishlists.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    existing = doc["product_ids"] if doc else []
+    merged = existing + [i for i in valid_ids if i not in existing]
+    await db.wishlists.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"product_ids": merged, "updated_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"product_ids": merged}
+
+
 # ---------------------------------------------------------------- Stripe checkout
 def make_stripe(request: Request) -> StripeCheckout:
     host_url = str(request.base_url)
@@ -513,7 +683,7 @@ def make_stripe(request: Request) -> StripeCheckout:
 
 @api_router.post("/checkout/session")
 async def create_checkout_session(body: CheckoutCreateIn, request: Request, user: dict = Depends(get_current_user)):
-    order = await build_order(user, body.items, body.shipping, "stripe", "pending_payment")
+    order = await build_order(user, body.items, body.shipping, "stripe", "pending_payment", origin=body.origin_url)
     origin = body.origin_url.rstrip("/")
     success_url = f"{origin}/order-success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/checkout"
@@ -554,6 +724,7 @@ async def mark_session_paid(session_id: str):
             {"order_id": tx["order_id"], "status": {"$ne": "paid"}},
             {"$set": {"status": "paid", "paid_at": datetime.now(timezone.utc).isoformat()}},
         )
+        await trigger_order_confirmation(tx["order_id"])
 
 
 @api_router.get("/checkout/status/{session_id}")
@@ -619,6 +790,8 @@ async def startup():
     await db.orders.create_index("user_id")
     await db.orders.create_index("order_id")
     await db.payment_transactions.create_index("session_id")
+    await db.wishlists.create_index("user_id")
+    await db.emails.create_index("order_id")
     for p in PRODUCTS_SEED:
         await db.products.update_one({"id": p["id"]}, {"$set": {**p, "colors": COLORWAYS}}, upsert=True)
     await seed_user(os.environ["ADMIN_EMAIL"], os.environ["ADMIN_PASSWORD"], "Admin", "admin")

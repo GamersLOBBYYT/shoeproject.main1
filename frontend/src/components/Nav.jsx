@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
+import { useWishlist } from "@/context/WishlistContext";
 
 export const Nav = () => {
   const { user, logout } = useAuth();
   const { count, setCartOpen } = useCart();
+  const { count: wishCount } = useWishlist();
   const navigate = useNavigate();
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
@@ -37,6 +39,15 @@ export const Nav = () => {
         <li><a href="#reviews" onClick={(e) => { e.preventDefault(); goSection("reviews"); }} data-testid="nav-link-reviews">Reviews</a></li>
       </ul>
       <div className="nav__actions">
+        <button
+          className="nav__icon-btn"
+          aria-label="Wishlist"
+          onClick={() => navigate("/wishlist")}
+          data-testid="nav-wishlist-btn"
+        >
+          <i className={`${wishCount > 0 ? "fa-solid" : "fa-regular"} fa-heart`}></i>
+          {wishCount > 0 && <span className="cart-count" data-testid="wishlist-count">{wishCount}</span>}
+        </button>
         {user && (
           <button
             className="nav__icon-btn"

@@ -55,6 +55,7 @@ export default function CheckoutPage() {
       items: payloadItems,
       shipping,
       card_last4: card.number.replace(/\s/g, "").slice(-4),
+      origin_url: window.location.origin,
     });
     clearCart();
     navigate(`/order-success?order_id=${data.order_id}`);

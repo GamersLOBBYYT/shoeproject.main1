@@ -5,6 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
+import { WishlistProvider } from "@/context/WishlistContext";
 import { Nav } from "@/components/Nav";
 import { CartDrawer } from "@/components/CartDrawer";
 import Home from "@/pages/Home";
@@ -12,6 +13,7 @@ import AuthPage from "@/pages/AuthPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import SuccessPage from "@/pages/SuccessPage";
 import OrdersPage from "@/pages/OrdersPage";
+import WishlistPage from "@/pages/WishlistPage";
 import TrackOrderPage from "@/pages/TrackOrderPage";
 
 const TOAST_OPTIONS = {
@@ -83,6 +85,7 @@ function AppRouter() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/wishlist" element={<WishlistPage />} />
         <Route path="/checkout" element={<ProtectedRoute><CheckoutPage /></ProtectedRoute>} />
         <Route path="/order-success" element={<ProtectedRoute><SuccessPage /></ProtectedRoute>} />
         <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
@@ -97,10 +100,12 @@ function App() {
   return (
     <AuthProvider>
       <CartProvider>
-        <BrowserRouter>
-          <AppRouter />
-          <Toaster position="top-center" duration={2500} theme="dark" toastOptions={TOAST_OPTIONS} />
-        </BrowserRouter>
+        <WishlistProvider>
+          <BrowserRouter>
+            <AppRouter />
+            <Toaster position="top-center" duration={2500} theme="dark" toastOptions={TOAST_OPTIONS} />
+          </BrowserRouter>
+        </WishlistProvider>
       </CartProvider>
     </AuthProvider>
   );
