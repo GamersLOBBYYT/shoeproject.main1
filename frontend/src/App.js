@@ -93,7 +93,8 @@ function App() {
         <BrowserRouter>
           <AppRouter />
           <Toaster
-            position="bottom-right"
+            position="top-center"
+            duration={2500}
             theme="dark"
             toastOptions={{
               style: {
