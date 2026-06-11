@@ -1,14 +1,17 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 
 const CartContext = createContext(null);
 
 const load = () => {
   try {
     return JSON.parse(localStorage.getItem("sole-cart")) || [];
-  } catch {
+  } catch (e) {
+    console.error("Failed to parse stored cart, starting empty:", e);
     return [];
   }
 };
+
+const keyOf = (productId, colorName) => `${productId}__${colorName}`;
 
 export const CartProvider = ({ children }) => {
   const [items, setItems] = useState(load);
@@ -18,9 +21,7 @@ export const CartProvider = ({ children }) => {
     localStorage.setItem("sole-cart", JSON.stringify(items));
   }, [items]);
 
-  const keyOf = (productId, colorName) => `${productId}__${colorName}`;
-
-  const addItem = (product, color) => {
+  const addItem = useCallback((product, color) => {
     const key = keyOf(product.id, color.name);
     setItems((prev) => {
       const existing = prev.find((i) => i.key === key);
@@ -40,29 +41,26 @@ export const CartProvider = ({ children }) => {
         },
       ];
     });
-  };
+  }, []);
 
-  const updateQty = (key, delta) => {
+  const updateQty = useCallback((key, delta) => {
     setItems((prev) =>
       prev
         .map((i) => (i.key === key ? { ...i, quantity: i.quantity + delta } : i))
         .filter((i) => i.quantity > 0)
     );
-  };
+  }, []);
 
-  const removeItem = (key) => setItems((prev) => prev.filter((i) => i.key !== key));
-  const clearCart = () => setItems([]);
+  const removeItem = useCallback((key) => setItems((prev) => prev.filter((i) => i.key !== key)), []);
+  const clearCart = useCallback(() => setItems([]), []);
 
-  const count = items.reduce((s, i) => s + i.quantity, 0);
-  const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const value = useMemo(() => {
+    const count = items.reduce((s, i) => s + i.quantity, 0);
+    const subtotal = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    return { items, addItem, updateQty, removeItem, clearCart, count, subtotal, cartOpen, setCartOpen };
+  }, [items, addItem, updateQty, removeItem, clearCart, cartOpen]);
 
-  return (
-    <CartContext.Provider
-      value={{ items, addItem, updateQty, removeItem, clearCart, count, subtotal, cartOpen, setCartOpen }}
-    >
-      {children}
-    </CartContext.Provider>
-  );
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 };
 
 export const useCart = () => useContext(CartContext);

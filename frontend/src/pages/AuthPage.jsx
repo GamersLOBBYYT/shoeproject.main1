@@ -29,6 +29,9 @@ export default function AuthPage() {
     }
   };
 
+  let submitLabel = mode === "login" ? "Sign In" : "Create Account";
+  if (busy) submitLabel = "Please wait…";
+
   return (
     <div className="page auth-page" data-testid="auth-page">
       <div className="auth-card">
@@ -96,7 +99,7 @@ export default function AuthPage() {
           {error && <div className="auth-error" data-testid="auth-error">{error}</div>}
 
           <button type="submit" className="btn btn--primary btn--block" disabled={busy} data-testid="auth-submit-btn">
-            {busy ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
+            {submitLabel}
           </button>
         </form>
 

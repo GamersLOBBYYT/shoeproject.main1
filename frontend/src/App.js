@@ -14,6 +14,15 @@ import SuccessPage from "@/pages/SuccessPage";
 import OrdersPage from "@/pages/OrdersPage";
 import TrackOrderPage from "@/pages/TrackOrderPage";
 
+const TOAST_OPTIONS = {
+  style: {
+    background: "#1e1e32",
+    border: "1px solid rgba(255,255,255,0.08)",
+    color: "#f0f0f5",
+    fontFamily: "'Space Grotesk', sans-serif",
+  },
+};
+
 // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
 const AuthCallback = () => {
   const { processGoogleSession } = useAuth();
@@ -23,19 +32,17 @@ const AuthCallback = () => {
   useEffect(() => {
     if (hasProcessed.current) return;
     hasProcessed.current = true;
-    const hash = window.location.hash;
-    const sessionId = new URLSearchParams(hash.replace("#", "")).get("session_id");
+    const sessionId = new URLSearchParams(window.location.hash.replace("#", "")).get("session_id");
     (async () => {
       try {
         await processGoogleSession(sessionId);
-      } catch {
-        // fall through to home either way
+      } catch (e) {
+        console.error("Google session exchange failed:", e);
       }
       window.history.replaceState(null, "", window.location.pathname);
       navigate("/", { replace: true });
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [navigate, processGoogleSession]);
 
   return (
     <div className="page auth-page">
@@ -92,19 +99,7 @@ function App() {
       <CartProvider>
         <BrowserRouter>
           <AppRouter />
-          <Toaster
-            position="top-center"
-            duration={2500}
-            theme="dark"
-            toastOptions={{
-              style: {
-                background: "#1e1e32",
-                border: "1px solid rgba(255,255,255,0.08)",
-                color: "#f0f0f5",
-                fontFamily: "'Space Grotesk', sans-serif",
-              },
-            }}
-          />
+          <Toaster position="top-center" duration={2500} theme="dark" toastOptions={TOAST_OPTIONS} />
         </BrowserRouter>
       </CartProvider>
     </AuthProvider>

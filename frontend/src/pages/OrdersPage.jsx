@@ -48,8 +48,8 @@ export default function OrdersPage() {
                 <span className={`status-pill ${st.cls}`} data-testid={`order-status-${order.order_id}`}>{st.label}</span>
               </div>
               <div className="order-card__items">
-                {order.items.map((item, idx) => (
-                  <div className="order-card__thumb" key={idx} title={`${item.name} × ${item.quantity}`}>
+                {order.items.map((item) => (
+                  <div className="order-card__thumb" key={`${item.product_id}-${item.color?.name || "default"}`} title={`${item.name} × ${item.quantity}`}>
                     <img src={item.image} alt={item.name} style={{ filter: item.color?.filter === "none" ? undefined : item.color?.filter }} />
                     <span>×{item.quantity}</span>
                   </div>

@@ -27,6 +27,7 @@ User supplied a complete dark, 3D-style HTML/CSS/JS landing page ("SOLE — Prem
 - Checkout: shipping form, Stripe checkout redirect (server-side prices, payment_transactions, status polling, webhook) and Demo Payment (instant paid)
 - Order success page (poll/verify), Orders list page, Live tracking page (animated timeline + Leaflet map with warehouse/package/destination markers, moving truck marker, ETA)
 - Testing: 18/19 backend pytest + full frontend E2E passed (iteration_1); lockout + toast-overlap fixes applied and verified
+- Code quality refactor (June 11, 2026): extracted TrackingMap/TrackTimeline, checkout sub-components (ShippingForm/PaymentMethods/OrderSummary), home Sections, useStripePolling hook; memoized Auth/Cart context values (useMemo/useCallback); fixed hook deps, index keys, nested ternaries, empty catches; 19/19 backend tests pass post-refactor
 
 ## Credentials
 See `/app/memory/test_credentials.md` (admin@sole.com / Admin@123, john@sole.com / Password123)

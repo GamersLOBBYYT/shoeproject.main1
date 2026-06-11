@@ -204,7 +204,7 @@ class TestOrders:
         assert order["subtotal"] == 90.0
         assert order["shipping_fee"] == 8.0
         assert order["total"] == 98.0
-        assert order["paid_at"] is not None
+        assert order["paid_at"]
         # verify GET
         r2 = auth_session.get(f"{API}/orders/{order['order_id']}")
         assert r2.status_code == 200
@@ -233,12 +233,12 @@ class TestOrders:
         r2 = auth_session.get(f"{API}/orders/{order_id}/tracking")
         assert r2.status_code == 200, r2.text
         t = r2.json()
-        assert t["awaiting_payment"] is False
+        assert not t["awaiting_payment"]
         assert len(t["stages"]) == 5
         keys = [s["key"] for s in t["stages"]]
         assert keys == ["ordered", "packed", "shipped", "out_for_delivery", "delivered"]
         # First stage 'ordered' should be completed immediately (offset 0)
-        assert t["stages"][0]["completed"] is True
+        assert t["stages"][0]["completed"]
         assert isinstance(t["position"], list) and len(t["position"]) == 2
         assert isinstance(t["route"], list) and len(t["route"]) >= 2
         assert 0 <= t["progress"] <= 1
